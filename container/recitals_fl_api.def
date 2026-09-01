@@ -1,0 +1,96 @@
+# recitals_fl_api.def
+# ═══════════════════════════════════════════════════════════════════
+#  Apptainer definition file for the RECITALS FL API
+#
+#  Plain-English explanation:
+#  ─────────────────────────
+#  Apptainer is exactly like Docker but designed for research servers
+#  where users don't have root/admin access. This .def file is the
+#  equivalent of a Dockerfile.
+#
+#  Build command (run once on Neumann):
+#    apptainer build recitals_fl_api.sif recitals_fl_api.def
+#
+#  Run command:
+#    apptainer run --bind ./models:/app/models recitals_fl_api.sif
+#
+#  The .sif file produced IS the self-contained image for the deliverable.
+# ═══════════════════════════════════════════════════════════════════
+
+Bootstrap: docker
+From: python:3.11-slim
+
+%labels
+    Author "L3S Research Center – RECITALS Project"
+    Version "1.0.0"
+    Source "https://github.com/upadhyaya-l3s/RECITALS-federated-learning"
+    License "Apache-2.0"
+
+%help
+    RECITALS Federated Learning – Insider Threat Detection API
+    
+    Run:
+        apptainer run --bind ./models:/app/models recitals_fl_api.sif
+    
+    Then access:
+        http://localhost:8000/docs    (Swagger UI)
+        http://localhost:8000/health  (health check)
+
+%files
+    # Copy API source code into the container
+    # Left side  = path on Neumann
+    # Right side = path inside the container
+    api/app/main.py        /app/app/main.py
+    api/requirements.txt   /app/requirements.txt
+
+%post
+    # This section runs inside the container during build
+    # Everything here becomes part of the permanent image
+
+    echo "==> Installing system dependencies..."
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+    echo "==> Installing Python packages..."
+    pip install --upgrade pip
+    pip install --no-cache-dir \
+        fastapi==0.111.0 \
+        "uvicorn[standard]==0.29.0" \
+        pydantic==2.7.1 \
+        torch==2.3.0 \
+        numpy==1.26.4
+
+    echo "==> Creating model directory..."
+    mkdir -p /app/models
+
+    echo "==> Build complete."
+
+%environment
+    # Environment variables available when the container runs
+    export MODEL_PATH=/app/models/federated_lstm_heterogeneous_moderate.pt
+    export MODEL_VERSION=fl-lstm-fedavg-v1.0-cert-r4.2
+    export LOG_LEVEL=info
+    export PYTHONUNBUFFERED=1
+    # Add /app to Python path so 'from app.main import ...' works
+    export PYTHONPATH=/app:$PYTHONPATH
+
+%runscript
+    # This is what runs when you do: apptainer run recitals_fl_api.sif
+    echo "Starting RECITALS FL Insider Threat Detection API..."
+    echo "Model path: $MODEL_PATH"
+    echo "Swagger UI will be at: http://localhost:8000/docs"
+    exec uvicorn app.main:app \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --workers 2 \
+        --log-level info
+
+%startscript
+    # Used when running as a background service
+    exec uvicorn app.main:app \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --workers 2 \
+        --log-level info
